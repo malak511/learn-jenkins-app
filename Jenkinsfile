@@ -6,18 +6,16 @@ pipeline {
         stage('Build') {
             agent {
                 docker {
-                    image 'node:18-alpine'
+                    image 'node:20-alpine'
                     reuseNode true
                 }
             }
             steps {
                 sh '''
-                    ls -la
                     node --version
                     npm --version
                     npm ci
                     npm run build
-                    ls -la
                 '''
             }
         }
@@ -28,19 +26,19 @@ pipeline {
                 stage('Unit tests') {
                     agent {
                         docker {
-                            image 'node:18-alpine'
+                            image 'node:20-alpine'
                             reuseNode true
                         }
                     }
                     steps {
                         sh '''
                             mkdir -p test-results
-                            CI=true npm test -- --watchAll=false --forceExit
+                            CI=true npx react-scripts test --watchAll=false --forceExit --reporters=default --reporters=jest-junit
                         '''
                     }
                     post {
                         always {
-                            // Matches "outputDirectory": "test-results" in package.json
+                            // jest-junit config in package.json writes to test-results/junit.xml
                             junit allowEmptyResults: true, testResults: 'test-results/junit.xml'
                         }
                     }
@@ -55,14 +53,16 @@ pipeline {
                     }
                     steps {
                         sh '''
-                            npm install serve
-                            node_modules/.bin/serve -s build &
+                            # install serve outside the workspace so it can't disturb the unit tests running in parallel
+                            npm install --prefix /tmp/serve serve
+                            /tmp/serve/node_modules/.bin/serve -s build &
                             sleep 10
                             PLAYWRIGHT_HTML_OPEN=never npx playwright test --reporter=html
                         '''
                     }
                     post {
                         always {
+                            // requires the "HTML Publisher" plugin
                             publishHTML([
                                 allowMissing: true,
                                 alwaysLinkToLastBuild: false,
@@ -82,7 +82,7 @@ pipeline {
         stage('Deploy') {
             agent {
                 docker {
-                    image 'node:18-alpine'
+                    image 'node:20-alpine'
                     reuseNode true
                 }
             }
