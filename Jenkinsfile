@@ -1,38 +1,97 @@
-
 pipeline {
-    agent {
-        docker {
-            image 'node:20-alpine'
-        }
-    }
+    agent any
 
     stages {
+
         stage('Build') {
+            agent {
+                docker {
+                    image 'node:18-alpine'
+                    reuseNode true
+                }
+            }
             steps {
                 sh '''
+                    ls -la
+                    node --version
+                    npm --version
                     npm ci
                     npm run build
+                    ls -la
                 '''
             }
         }
 
-       stage('Test') {
-    steps {
-        sh '''
-            mkdir -p test-results
-            set +e
-            npm test -- --watchAll=false --forceExit
-            echo "npm test exit code: $?"
-            ls -la test-results
-            exit 0
-        '''
-    }
-}
-    }
+        stage('Tests') {
+            parallel {
 
-    post {
-        always {
-            junit 'test-results/junit.xml'
+                stage('Unit tests') {
+                    agent {
+                        docker {
+                            image 'node:18-alpine'
+                            reuseNode true
+                        }
+                    }
+                    steps {
+                        sh '''
+                            mkdir -p test-results
+                            CI=true npm test -- --watchAll=false --forceExit
+                        '''
+                    }
+                    post {
+                        always {
+                            // Matches "outputDirectory": "test-results" in package.json
+                            junit allowEmptyResults: true, testResults: 'test-results/junit.xml'
+                        }
+                    }
+                }
+
+                stage('E2E') {
+                    agent {
+                        docker {
+                            image 'mcr.microsoft.com/playwright:v1.39.0-jammy'
+                            reuseNode true
+                        }
+                    }
+                    steps {
+                        sh '''
+                            npm install serve
+                            node_modules/.bin/serve -s build &
+                            sleep 10
+                            PLAYWRIGHT_HTML_OPEN=never npx playwright test --reporter=html
+                        '''
+                    }
+                    post {
+                        always {
+                            publishHTML([
+                                allowMissing: true,
+                                alwaysLinkToLastBuild: false,
+                                keepAll: false,
+                                reportDir: 'playwright-report',
+                                reportFiles: 'index.html',
+                                reportName: 'Playwright HTML Report',
+                                reportTitles: '',
+                                useWrapperFileDirectly: true
+                            ])
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Deploy') {
+            agent {
+                docker {
+                    image 'node:18-alpine'
+                    reuseNode true
+                }
+            }
+            steps {
+                sh '''
+                    npm install netlify-cli@20.1.1
+                    node_modules/.bin/netlify --version
+                '''
+            }
         }
     }
 }
