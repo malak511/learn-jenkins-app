@@ -17,13 +17,13 @@ pipeline {
         }
 
         stage('Test') {
-            steps {
-                sh '''
-                    mkdir -p test-results
-                    CI=true JEST_JUNIT_OUTPUT_DIR=./test-results JEST_JUNIT_OUTPUT_NAME=junit.xml npm test -- --watchAll=false
-                '''
-            }
-        }
+    steps {
+        sh '''
+            mkdir -p test-results
+            CI=true JEST_JUNIT_OUTPUT_DIR=./test-results JEST_JUNIT_OUTPUT_NAME=junit.xml npm test -- --watchAll=false --forceExit
+        '''
+    }
+}
     }
 
     post {
