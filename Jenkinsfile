@@ -56,8 +56,12 @@ pipeline {
                             # install serve outside the workspace so it can't disturb the unit tests running in parallel
                             npm install --prefix /tmp/serve serve
                             /tmp/serve/node_modules/.bin/serve -s build &
+                            SERVE_PID=$!
                             sleep 10
                             PLAYWRIGHT_HTML_OPEN=never npx playwright test --reporter=html
+                            RESULT=$?
+                            kill $SERVE_PID || true
+                            exit $RESULT
                         '''
                     }
                     post {
@@ -82,13 +86,47 @@ pipeline {
         stage('Deploy') {
             agent {
                 docker {
-                    image 'node:20-alpine'
+                    // Debian-based image: avoids the musl-specific sharp/libvips download
+                    image 'node:20'
                     reuseNode true
                 }
             }
             steps {
                 sh '''
-                    npm install netlify-cli@20.1.1
+                    npm config set fetch-retries 5
+                    npm config set fetch-retry-mintimeout 20000
+                    npm config set fetch-timeout 180000
+
+                    installed=false
+
+                    # Attempt 1-2: default sharp download (GitHub)
+                    for i in 1 2; do
+                        echo "Install attempt $i (default host)"
+                        if npm install netlify-cli@20.1.1; then
+                            installed=true
+                            break
+                        fi
+                        sleep 5
+                    done
+
+                    # Attempt 3-4: fall back to a mirror for the sharp-libvips binary
+                    if [ "$installed" = "false" ]; then
+                        export npm_config_sharp_libvips_binary_host="https://npmmirror.com/mirrors/sharp-libvips"
+                        for i in 3 4; do
+                            echo "Install attempt $i (mirror host)"
+                            if npm install netlify-cli@20.1.1; then
+                                installed=true
+                                break
+                            fi
+                            sleep 5
+                        done
+                    fi
+
+                    if [ "$installed" = "false" ]; then
+                        echo "netlify-cli installation failed after all attempts"
+                        exit 1
+                    fi
+
                     node_modules/.bin/netlify --version
                 '''
             }
